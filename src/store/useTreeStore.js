@@ -8,61 +8,94 @@ export const BRANCH_COLORS = [
   { id: "lilac", paint: "#9178b8", light: "#ede8f8" },
 ];
 
-let _nid = 1;
-
 export const useTreeStore = create((set, get) => ({
-  branches: [],
+  activeTrees: [],
+  finishedTrees: [],
+  currentTreeId: null,
+  
+  wizard: null, // { step, topic, intention, treeName, structure }
 
-  addBranch: () =>
-    set((s) => {
-      if (s.branches.length >= 5) return s;
-      const col = BRANCH_COLORS[s.branches.length];
-      return {
-        branches: [
-          ...s.branches,
-          { id: _nid++, name: "", colorId: col.id, checkpoints: [] },
-        ],
+  startWizard: () => set({ 
+    wizard: { step: 1, topic: "", intention: "", treeName: "", structure: [] },
+    currentTreeId: null 
+  }),
+  
+  updateWizard: (data) => set((s) => ({ wizard: { ...s.wizard, ...data } })),
+  
+  closeWizard: () => set({ wizard: null }),
+
+  plantTree: () => set((s) => {
+    if (!s.wizard || !s.wizard.structure) return s;
+    const newTree = {
+      id: crypto.randomUUID(),
+      name: s.wizard.treeName || s.wizard.topic || "New Tree",
+      topic: s.wizard.topic,
+      intention: s.wizard.intention,
+      branches: s.wizard.structure,
+      dateStarted: new Date().toLocaleDateString(),
+    };
+    return {
+      activeTrees: [...s.activeTrees, newTree],
+      currentTreeId: newTree.id,
+      wizard: null
+    };
+  }),
+
+  setCurrentTree: (id) => set({ currentTreeId: id, wizard: null }),
+
+  toggleItemDone: (treeId, itemId) => set((s) => {
+    const updatedTrees = s.activeTrees.map(tree => {
+      if (tree.id !== treeId) return tree;
+
+      // Deep clone branches to toggle item
+      const clonedBranches = JSON.parse(JSON.stringify(tree.branches));
+      
+      let found = false;
+      const toggleInBranch = (branch) => {
+        if (found) return;
+        if (branch.items) {
+          const item = branch.items.find(i => i.id === itemId);
+          if (item) {
+            item.done = !item.done;
+            found = true;
+          }
+        }
+        if (!found && branch.subs) {
+          branch.subs.forEach(toggleInBranch);
+        }
       };
-    }),
 
-  deleteBranch: (id) =>
-    set((s) => ({ branches: s.branches.filter((b) => b.id !== id) })),
+      clonedBranches.forEach(toggleInBranch);
+      return { ...tree, branches: clonedBranches };
+    });
 
-  updateBranchName: (id, name) =>
-    set((s) => ({
-      branches: s.branches.map((b) => (b.id === id ? { ...b, name } : b)),
-    })),
+    return { activeTrees: updatedTrees };
+  }),
 
-  addCheckpoint: (branchId, text) =>
-    set((s) => ({
-      branches: s.branches.map((b) =>
-        b.id !== branchId
-          ? b
-          : { ...b, checkpoints: [...b.checkpoints, { text, done: false }] }
-      ),
-    })),
+  checkTreeCompletion: (treeId) => set((s) => {
+    const tree = s.activeTrees.find(t => t.id === treeId);
+    if (!tree) return s;
 
-  toggleCheckpoint: (branchId, idx) =>
-    set((s) => ({
-      branches: s.branches.map((b) => {
-        if (b.id !== branchId) return b;
-        return {
-          ...b,
-          checkpoints: b.checkpoints.map((cp, i) =>
-            i === idx ? { ...cp, done: !cp.done } : cp
-          ),
-        };
-      }),
-    })),
+    let allDone = true;
+    const checkBranch = (branch) => {
+      if (branch.items) {
+        branch.items.forEach(i => { if (!i.done) allDone = false; });
+      }
+      if (branch.subs) {
+        branch.subs.forEach(checkBranch);
+      }
+    };
+    
+    tree.branches.forEach(checkBranch);
 
-  deleteCheckpoint: (branchId, idx) =>
-    set((s) => ({
-      branches: s.branches.map((b) => {
-        if (b.id !== branchId) return b;
-        return {
-          ...b,
-          checkpoints: b.checkpoints.filter((_, i) => i !== idx),
-        };
-      }),
-    })),
+    if (allDone) {
+      const finished = { ...tree, dateFinished: new Date().toLocaleDateString() };
+      return {
+        activeTrees: s.activeTrees.filter(t => t.id !== treeId),
+        finishedTrees: [...s.finishedTrees, finished],
+        currentTreeId: null
+      };
+    }
+    return s;
+  }),
 }));
